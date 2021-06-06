@@ -221,7 +221,7 @@ foreach ($network in $networks)
         Write-Log "Getting the devices in this network"
         $deviceURL = "https://dashboard.meraki.com/api/v1/networks/$networkID/devices"
         $device = Invoke-RestMethod -Uri $deviceURL -Headers $headers -Method 'GET'
-        if ( $device.model -like "Z*" -or $null -eq $device.model -or $device.model -like "MS*" )
+        if ( $device.model -like "Z*" -or $null -eq $device.model <#-or $device.model -like "MS*"#> )
         { 
             Write-Log "Found a $($device.model), skipping"
             continue 
