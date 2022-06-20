@@ -3,7 +3,7 @@ Connect-AzAccount
 
 # Sub 1
 Set-AzContext -Subscription ""
-$SQLServers = Get-AzSqlServer #-ServerName "atx-alibabaazure-dev"
+$SQLServers = Get-AzSqlServer #-ServerName "<server name>"
 
 # Sub 2
 Set-AzContext -Subscription ""

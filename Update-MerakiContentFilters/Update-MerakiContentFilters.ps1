@@ -132,13 +132,25 @@ if (-not $ApiKey)
     throw "Please enter and API Key to continue"
 }
 
+# Set email creds
+if (-not $GetOnly)
+{
+    $emailCreds = Get-Credential -Message "Please enter the SMTP user account for O365"
+    if (-not $emailCreds)
+    {
+        Write-Log "ERROR: SMTP Email credentials cannot be blank"
+        Stop-Transcript
+        exit 1
+    }
+}
+
 # Set TLS to 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # Vars
-$from = ""
+$from = "$($emailCreds.UserName)"
 $to = ""
-$smtp = ""
+$smtp = "smtp.office365.com"
 $emailBody = "<strong>Script run from:</strong> $env:COMPUTERNAME<br/>"
 $emailBody += "<strong>Username:</strong> $env:USERNAME<br/><br/>"
 $emailBodyAppend = ""
@@ -209,22 +221,23 @@ if ($AddToWhiteList -or $AddToBlackList)
 
 foreach ($network in $networks)
 {
-    
+    Write-Log "Working on $($network.name) - $($network.productTypes)"
     $networkID = $network.ID
     $contentFilteringOutputFile = ($network.name + ".json")
-    $contentFilteringURL = "https://dashboard.meraki.com/api/v1/networks/$networkID/contentFiltering"
+    $contentFilteringURL = "https://dashboard.meraki.com/api/v1/networks/$networkID/appliance/contentFiltering"
 
     # Check for wireless network or Z1/Z3 and skip network
-    if ($network.type -ne "combined" -and $network.type -ne "appliance" -or $network.productTypes -like "*wireless*") { continue }
+    if ($network.productTypes -notcontains "appliance") { continue }
     try
     {
         Write-Log "Getting the devices in this network"
         $deviceURL = "https://dashboard.meraki.com/api/v1/networks/$networkID/devices"
         $device = Invoke-RestMethod -Uri $deviceURL -Headers $headers -Method 'GET'
+
         if ( $device.model -like "Z*" -or $null -eq $device.model <#-or $device.model -like "MS*"#> )
         { 
             Write-Log "Found a $($device.model), skipping"
-            continue 
+            continue
         }
     }
     catch
@@ -361,7 +374,6 @@ foreach ($network in $networks)
 
 if ($networksChanged)
 {
-
     # Write changes into the defaultFilter.json
     Write-Log "Updating the defaultFilter file to include changes"
     $updatedFilter = Out-File $FilterFile -InputObject ($defaultFilter | ConvertTo-Json) -Force
@@ -378,6 +390,8 @@ if ($networksChanged)
             -Subject 'ALERT: Meraki API used to change content filters' `
             -Body ($emailBody + $emailBodyAppend) -BodyAsHtml `
             -SmtpServer $smtp `
+            -Port 587 `
+            -Credential $emailCreds `
             -UseSsl
     }
     catch
