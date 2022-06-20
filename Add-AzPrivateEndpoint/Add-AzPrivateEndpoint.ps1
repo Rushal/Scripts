@@ -1,4 +1,6 @@
 $pePrefix = "<private endpoint prefix>"
+$region = "southcentralus"
+$privateDnsRg = ""
 Connect-AzAccount
 
 # Sub 1
@@ -11,8 +13,11 @@ $SQLServers += Get-AzSqlServer
 
 # Sub 3
 Set-AzContext -Subscription ""
-$virtualNetwork = Get-AzVirtualNetwork -ResourceGroupName  "<RG>" -Name "<VNET>"
-$subnet = $virtualNetwork | select -ExpandProperty subnets | Where-Object { $_.Name -eq '<subnet>' }
+$sub3Rg = "<RG>"
+$sub3Vnet = "<Vnet>"
+$sub3Subnet = "<subnet>"
+$virtualNetwork = Get-AzVirtualNetwork -ResourceGroupName  "$sub3Rg" -Name "$sub3Vnet"
+$subnet = $virtualNetwork | Select-Object -ExpandProperty subnets | Where-Object { $_.Name -eq "$sub3Subnet" }
 
 foreach ($SQLServer in $SQLServers)
 {
@@ -26,11 +31,11 @@ foreach ($SQLServer in $SQLServers)
 
     # Setup private endpoint connection (pending approval)
     $privateEndpointConnection = New-AzPrivateLinkServiceConnection -RequestMessage "<message> - $($SQLServer.ServerName)" -Name "$pePrefix$($SQLServer.ServerName)" -PrivateLinkServiceId $SQLserver.ResourceId -GroupId "sqlServer"
-    $privateEndpointForSQLServer = New-AzPrivateEndpoint -ByManualRequest -ResourceGroupName "<rg>" -Name "$pePrefix$($SQLServer.ServerName)" -Location "southcentralus" -Subnet $subnet -PrivateLinkServiceConnection $privateEndpointConnection
+    $privateEndpointForSQLServer = New-AzPrivateEndpoint -ByManualRequest -ResourceGroupName "$sub3RG" -Name "$pePrefix$($SQLServer.ServerName)" -Location "$region" -Subnet $subnet -PrivateLinkServiceConnection $privateEndpointConnection
 
     Write-Host "Setting up Private DNS for: $pePrefix$($SQLServer.ServerName)"
     # Add private endpoint dns 
-    $zone = Get-AzPrivateDnsZone -ResourceGroupName "<rg>" -Name "privatelink.database.windows.net"
+    $zone = Get-AzPrivateDnsZone -ResourceGroupName "$privateDnsRg" -Name "privatelink.database.windows.net"
     $config = New-AzPrivateDnsZoneConfig -Name "privatelink.database.windows.net" -PrivateDnsZoneId $zone.ResourceId
-    $dnsEntry = New-AzPrivateDnsZoneGroup -ResourceGroupName "<RG>" -PrivateEndpointName "$pePrefix$($SQLServer.ServerName)" -Name "$pePrefix$($SQLServer.ServerName)" -PrivateDnsZoneConfig $config
+    $dnsEntry = New-AzPrivateDnsZoneGroup -ResourceGroupName "$sub3Rg" -PrivateEndpointName "$pePrefix$($SQLServer.ServerName)" -Name "$pePrefix$($SQLServer.ServerName)" -PrivateDnsZoneConfig $config
 }
