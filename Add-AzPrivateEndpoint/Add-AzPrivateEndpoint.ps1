@@ -1,18 +1,23 @@
+$subID1 = ""
+$subID2 = ""
+$subID3 = ""
 $pePrefix = "<private endpoint prefix>"
 $region = "southcentralus"
 $privateDnsRg = ""
 Connect-AzAccount
 
+# Getting all SQL servers from Sub 1 and Sub 2.
+# Putting them in a variable and adding private endpoint connections to them from Sub 3 (pending approval)
 # Sub 1
-Set-AzContext -Subscription ""
+Set-AzContext -Subscription "$subID1"
 $SQLServers = Get-AzSqlServer #-ServerName "<server name>"
 
 # Sub 2
-Set-AzContext -Subscription ""
+Set-AzContext -Subscription "$subID2"
 $SQLServers += Get-AzSqlServer
 
 # Sub 3
-Set-AzContext -Subscription ""
+Set-AzContext -Subscription "$subID3"
 $sub3Rg = "<RG>"
 $sub3Vnet = "<Vnet>"
 $sub3Subnet = "<subnet>"
