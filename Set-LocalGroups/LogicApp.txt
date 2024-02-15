@@ -1,0 +1,361 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "actions": {
+            "Get_items_|_Only_entries_with_additional_pc_matching_hostname": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://<YOUR-ORG>.sharepoint.com/sites/<YOURSITE>'))}/tables/@{encodeURIComponent(encodeURIComponent('<YOUR-LIST>'))}/items",
+                    "queries": {
+                        "$filter": "@{variables('spoListFieldName')} eq 'Approve' and Devices/Title eq '@{variables('hostname')}'"
+                    }
+                },
+                "runAfter": {
+                    "Scope_|_Try_matching_device_owner_to_a_user_on_SPO_list": [
+                        "Succeeded",
+                        "Failed"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "HTTP_-_Get_current_Azure_AD_Device_ID,_TrustType": {
+                "inputs": {
+                    "authentication": {
+                        "audience": "https://graph.microsoft.com/",
+                        "type": "ManagedServiceIdentity"
+                    },
+                    "method": "GET",
+                    "uri": "https://graph.microsoft.com/v1.0/devices?$select=id,enrollmentType,trustType&$filter=startsWith(displayName,'@{variables('hostname')}')"
+                },
+                "runAfter": {
+                    "Initialize_variable_-_spoListFieldName": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Http"
+            },
+            "HTTP_-_Get_current_device_Azure_AD_owner": {
+                "inputs": {
+                    "authentication": {
+                        "audience": "https://graph.microsoft.com/",
+                        "type": "ManagedServiceIdentity"
+                    },
+                    "method": "GET",
+                    "uri": "https://graph.microsoft.com/v1.0/devices/@{body('HTTP_-_Get_current_Azure_AD_Device_ID,_TrustType')?['value'][0]['id']}/registeredOwners?$select=userPrincipalName"
+                },
+                "runAfter": {
+                    "HTTP_-_Get_current_Azure_AD_Device_ID,_TrustType": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Http"
+            },
+            "Initialize_variable_-_deviceOwner": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "deviceOwner",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_-_trustType": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_-_deviceOwnerUPN": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "deviceOwnerUPN",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "HTTP_-_Get_current_device_Azure_AD_owner": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_-_hostname": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "hostname",
+                            "type": "string",
+                            "value": "@{triggerOutputs()['queries']['hostname']}"
+                        }
+                    ]
+                },
+                "runAfter": {},
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_-_spoListFieldName": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "spoListFieldName",
+                            "type": "string",
+                            "value": "@{triggerOutputs()['queries']['spoListFieldName']}"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_-_hostname": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_-_trustType": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "trustType",
+                            "type": "string",
+                            "value": "@{body('HTTP_-_Get_current_Azure_AD_Device_ID,_TrustType')?['value'][0]['trustType']}"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Scope_|_Run_if_no_owner_on_Azure_Device_|_Check_Intune_Primary_User": [
+                        "Succeeded",
+                        "Skipped",
+                        "Failed"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_-_usersToAdd": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "usersToAdd",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_-_deviceOwner": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Loop_through_admin_requests_with_this_additional_pc": {
+                "actions": {
+                    "Append_to_array_variable_-_usersToAdd": {
+                        "inputs": {
+                            "name": "usersToAdd",
+                            "value": "@{body('HTTP_-_Get_SID')['onPremisesSecurityIdentifier']},@{body('HTTP_-_Get_SID')['securityIdentifier']}"
+                        },
+                        "runAfter": {
+                            "HTTP_-_Get_SID": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "AppendToArrayVariable"
+                    },
+                    "HTTP_-_Get_SID": {
+                        "inputs": {
+                            "authentication": {
+                                "audience": "https://graph.microsoft.com/",
+                                "type": "ManagedServiceIdentity"
+                            },
+                            "method": "GET",
+                            "uri": "https://graph.microsoft.com/v1.0/users/@{items('Loop_through_admin_requests_with_this_additional_pc')?['Requestor']?['Email']}?$select=onPremisesSecurityIdentifier,securityIdentifier "
+                        },
+                        "runAfter": {},
+                        "type": "Http"
+                    }
+                },
+                "foreach": "@body('Get_items_|_Only_entries_with_additional_pc_matching_hostname')?['value']",
+                "runAfter": {
+                    "Get_items_|_Only_entries_with_additional_pc_matching_hostname": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Foreach"
+            },
+            "Response": {
+                "inputs": {
+                    "body": {
+                        "device-owner": "@variables('deviceOwner')",
+                        "trustType": "@variables('trustType')",
+                        "users": "@variables('usersToAdd')"
+                    },
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Loop_through_admin_requests_with_this_additional_pc": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Scope_|_Run_if_no_owner_on_Azure_Device_|_Check_Intune_Primary_User": {
+                "actions": {
+                    "HTTP_-_Get_current_Device_Intune_ID": {
+                        "inputs": {
+                            "authentication": {
+                                "audience": "https://graph.microsoft.com/",
+                                "type": "ManagedServiceIdentity"
+                            },
+                            "method": "GET",
+                            "uri": "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$filter=deviceName eq '@{variables('hostname')}'"
+                        },
+                        "runAfter": {},
+                        "type": "Http"
+                    },
+                    "HTTP_-_Get_current_device's_primary_user": {
+                        "inputs": {
+                            "authentication": {
+                                "audience": "https://graph.microsoft.com/",
+                                "type": "ManagedServiceIdentity"
+                            },
+                            "method": "GET",
+                            "uri": "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/@{body('HTTP_-_Get_current_Device_Intune_ID')?['value'][0]['id']}/users?$select=userPrincipalName"
+                        },
+                        "runAfter": {
+                            "HTTP_-_Get_current_Device_Intune_ID": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Http"
+                    },
+                    "Set_variable": {
+                        "inputs": {
+                            "name": "deviceOwnerUPN",
+                            "value": "@{body('HTTP_-_Get_current_device''s_primary_user')?['value'][0]['userPrincipalName']}"
+                        },
+                        "runAfter": {
+                            "HTTP_-_Get_current_device's_primary_user": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "SetVariable"
+                    }
+                },
+                "runAfter": {
+                    "Set_variable_-_deviceOwnerUPN": [
+                        "Failed"
+                    ]
+                },
+                "type": "Scope"
+            },
+            "Scope_|_Try_matching_device_owner_to_a_user_on_SPO_list": {
+                "actions": {
+                    "For_each_approved": {
+                        "actions": {
+                            "Append_to_array_variable_-_deviceOwner": {
+                                "inputs": {
+                                    "name": "deviceOwner",
+                                    "value": "@{body('HTTP_-_Get_SID_copy')['onPremisesSecurityIdentifier']},@{body('HTTP_-_Get_SID_copy')['securityIdentifier']}"
+                                },
+                                "runAfter": {
+                                    "HTTP_-_Get_SID_copy": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "AppendToArrayVariable"
+                            },
+                            "HTTP_-_Get_SID_copy": {
+                                "inputs": {
+                                    "authentication": {
+                                        "audience": "https://graph.microsoft.com/",
+                                        "type": "ManagedServiceIdentity"
+                                    },
+                                    "method": "GET",
+                                    "uri": "https://graph.microsoft.com/v1.0/users/@{items('For_each_approved')?['Requestor']?['Email']}?$select=onPremisesSecurityIdentifier,securityIdentifier "
+                                },
+                                "runAfter": {},
+                                "type": "Http"
+                            }
+                        },
+                        "foreach": "@body('Get_items_|_Approved_entries_for_device_owner')?['value']",
+                        "runAfter": {
+                            "Get_items_|_Approved_entries_for_device_owner": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Foreach"
+                    },
+                    "Get_items_|_Approved_entries_for_device_owner": {
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://<YOUR-ORG>>.sharepoint.com/sites/<YOUR-SITE>'))}/tables/@{encodeURIComponent(encodeURIComponent('<YOUR-LIST>'))}/items",
+                            "queries": {
+                                "$filter": "@{variables('spoListFieldName')} eq 'Approve' and Requestor/EMail eq '@{variables('deviceOwnerUPN')}'"
+                            }
+                        },
+                        "runAfter": {},
+                        "type": "ApiConnection"
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variable_-_usersToAdd": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Scope"
+            },
+            "Set_variable_-_deviceOwnerUPN": {
+                "inputs": {
+                    "name": "deviceOwnerUPN",
+                    "value": "@{body('HTTP_-_Get_current_device_Azure_AD_owner')?['value'][0]['userPrincipalName']}"
+                },
+                "runAfter": {
+                    "Initialize_variable_-_deviceOwnerUPN": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "SetVariable"
+            }
+        },
+        "contentVersion": "1.0.0.0",
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        },
+        "triggers": {
+            "manual": {
+                "inputs": {
+                    "method": "GET",
+                    "schema": {}
+                },
+                "kind": "Http",
+                "type": "Request"
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "value": {
+                "sharepointonline": {
+                    "connectionId": "/subscriptions/<YOUR-SUB>/resourceGroups/<RG>/providers/Microsoft.Web/connections/sharepointonline",
+                    "connectionName": "sharepointonline",
+                    "id": "/subscriptions/<YOUR-SUB>/providers/Microsoft.Web/locations/<REGION>/managedApis/sharepointonline"
+                }
+            }
+        }
+    }
+}
