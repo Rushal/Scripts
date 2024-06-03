@@ -1,17 +1,17 @@
 <#
-   .Synopsis
+   .SYNOPSIS
    Update the Azure AD SSO Key
 
    .DESCRIPTION
    See MS Doc: https://docs.microsoft.com/en-us/azure/active-directory/hybrid/how-to-connect-sso-faq
    This is intended to be used with Azure Runbooks
-   This script will use an on-prem service account that is disabled
+   This script will use an on-prem service account that is disabled by default
    
    .OUTPUTS
    For logs see: $logFilePath
    
    .VERSION
-    1.0
+    1.1
     
     .AUTHOR
     Chucky A Ivey
@@ -22,12 +22,15 @@ param (
 )
 
 # Update with your service account info
-$domain = "example.com"
 $adServiceAccount = "svc.example"
 $automationCloudAccount = "svc.example-cloud"
 $automationLocalAccount = "svc.example-local"
+$accountEnabled = $false
 
 Write-Output "Running host: $env:computername"
+
+$cloudCreds = Get-AutomationPSCredential -Name "$automationCloudAccount"
+$creds = Get-AutomationPSCredential -Name "$automationLocalAccount"
 
 # Add service account to domain admins
 Write-Output "Enabling $adServiceAccount"
@@ -37,18 +40,38 @@ Write-Output "Adding $adServiceAccount to domain admins"
 Add-ADGroupMember -Identity "Domain Admins" -Members $adServiceAccount
 
 Write-Output "Forcing replication"
-$replication = repadmin /syncall /AdeP | select -Skip 9 | ? { ![string]::IsNullOrWhiteSpace($_) }
-$replication | select -Last 1
+$replication = repadmin /syncall /AdeP | Select-Object -Skip 9 | Where-Object { ![string]::IsNullOrWhiteSpace($_) }
+$replication | Select-Object -Last 1
 
-$cloudCreds = Get-AutomationPSCredential -Name "$automationCloudAccount"
-$creds = Get-AutomationPSCredential -Name "$automationLocalAccount"
+Start-Sleep -Seconds 10
+
+Write-Output "Run Delta Sync AAD"
 $session = New-PSSession -ComputerName $AADConnectPC -Credential $creds
+Invoke-Command -Session $session -ScriptBlock { Start-ADSyncSyncCycle -PolicyType Delta }
+
+try {
+    Write-Output "Attempting to import the Graph Module"
+    Import-Module "Microsoft.Graph.Authentication", "Microsoft.Graph.Users" -ErrorAction Stop
+    Write-Output "Graph Module successfully imported"
+}
+catch {
+    Write-Output "Failed to import Graph module"
+    exit
+}
+
+Write-Output "Connecting to Azure to check on account enablement"
+Connect-MgGraph -Identity
+while ($accountEnabled -eq $false) {
+    $accountEnabled = (Get-MgUser -Filter "startsWith(DisplayName, 'svc.aadsso')" -Property AccountEnabled -Top 1 -ErrorAction SilentlyContinue).AccountEnabled
+    Start-Sleep -Seconds 5
+}
+Write-Output "svc.aadsso is enabled, disconnecting"
+Disconnect-MgGraph
 
 $Job = Invoke-Command -Session $session -AsJob -ScriptBlock {
     Start-Transcript -Path "C:\Windows\Temp\Update-AadSso.log" -Append
 
-    Function Write-Log
-    {
+    Function Write-Log {
         Param ([string]$string)
         $dateTime = "[{0:MM/dd/yy} {0:HH:mm:ss}]" -f (Get-Date)
         Write-Output "$dateTime - $string"
@@ -56,35 +79,20 @@ $Job = Invoke-Command -Session $session -AsJob -ScriptBlock {
 
     Write-Log "Running host: $env:computername"
 
-    Write-Log "Delta Sync AAD"
-    Start-ADSyncSyncCycle -PolicyType Delta
-
-    Write-Log "Connecting to Azure to check on account enablement"
-    while ($azureConnection.Account -eq $null)
-    {
-        $azureConnection = Connect-AzureAD -Credential $using:cloudCreds -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 5
-    }
-    Write-Log "$adServiceAccount is enabled, disconnecting"
-    Disconnect-AzureAd
-
     #Region Attempt to import the AADSSO powershell module
-    try
-    {
+    try {
         Write-Log "Attempting to import the AAD SSO Module"
         Import-Module "C:\Program Files\Microsoft Azure Active Directory Connect\AzureADSSO.psd1" -ErrorAction Stop
         Write-Log "AAD SSO Module successfully imported"
     }
-    catch
-    {
+    catch {
         Write-Log "Failed to import: C:\Program Files\Microsoft Azure Active Directory Connect\AzureADSSO.psd1"
         Stop-Transcript
         exit
     }
     #Endregion
 
-    try
-    {
+    try {
         Write-Log "Trying to set Azure AD SSO Auth Context"
         New-AzureADSSOAuthenticationContext -CloudCredentials $using:cloudCreds -ErrorAction Stop
 
@@ -92,8 +100,7 @@ $Job = Invoke-Command -Session $session -AsJob -ScriptBlock {
         Update-AzureADSSOForest -OnPremCredentials $using:creds -ErrorAction Stop
         Write-Log "SSO Key recycled"
     }
-    catch
-    {
+    catch {
         Write-Log "Update-AzureADSSOForest failed to run"
         Stop-Transcript
     }
@@ -124,8 +131,8 @@ Write-Output "Disabling $adServiceAccount"
 Disable-ADAccount -Identity $adServiceAccount -Confirm:$false
 
 Write-Output "Forcing replication"
-$replication = repadmin /syncall /AdeP | select -Skip 9 | ? { ![string]::IsNullOrWhiteSpace($_) }
-$replication | select -Last 1
+$replication = repadmin /syncall /AdeP | Select-Object -Skip 9 | Where-Object { ![string]::IsNullOrWhiteSpace($_) }
+$replication | Select-Object -Last 1
 
 Write-Output "Run Delta Sync AAD"
 Invoke-Command -Session $session -ScriptBlock { Start-ADSyncSyncCycle -PolicyType Delta }
