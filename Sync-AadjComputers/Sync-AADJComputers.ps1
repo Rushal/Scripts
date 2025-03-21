@@ -1,4 +1,5 @@
 # Meant for Azure runbooks
+# Old... See the Objects script
 [CmdletBinding(DefaultParameterSetName = 'Default')]
 param(
     [Parameter(Mandatory = $False)] [String] $TenantId = "",
